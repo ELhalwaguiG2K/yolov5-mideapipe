@@ -6,6 +6,7 @@ from detect_modified import run
 import re
 import PIL.Image as Image
 import numpy as np
+from JsonData import MyEncoder
 
 UPLOAD_FOLDER = '\\uploads'
 ALLOWED_EXTENSIONS = set(['txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif'])
@@ -22,11 +23,12 @@ def upload_file():
         byte_data = base64.b64decode(base64_data)
         image_data = io.BytesIO(byte_data)
         img = Image.open(image_data)
-        img.save("E:/Testing/yolov5+mediapipe/uploads/test.jpg")
-        detectedDictionary = run()
-        return jsonify({'landmarks': detectedDictionary})
+        img.save("E:/Testing/yolov5_mideapipe/uploads/test.jpg")
+        root = run()
+        jsonized = MyEncoder().encode(root)
+        return jsonify(jsonized)
 
 
 if __name__ == "__main__":
     app.debug = True
-    app.run()
+    app.run(port=3000)

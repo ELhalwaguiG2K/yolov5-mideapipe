@@ -4,6 +4,8 @@ import platform
 import sys
 import mediapipe as mp
 from pathlib import Path
+
+import numpy as np
 from flask import Flask, request, jsonify
 import torch
 import torch.backends.cudnn as cudnn
@@ -11,6 +13,8 @@ from os import listdir
 from os.path import isfile, join
 from werkzeug.utils import secure_filename
 import shutil
+import matplotlib.pyplot as plt
+from JsonData import Person, Root, Landmark
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
@@ -25,15 +29,12 @@ from utils.general import (LOGGER, Profile, check_file, check_img_size, check_im
 from utils.plots import Annotator, colors, save_one_box
 from utils.torch_utils import select_device, smart_inference_mode
 
-array = []
-
 
 @smart_inference_mode()
 def run(
         weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
-
         # Add your images path here ya Mohamed
-        source=ROOT / "E:/Testing/yolov5+mediapipe/uploads/test.jpg",  # file/dir/URL/glob, 0 for webcam
+        source=ROOT / "E:/Testing/yolov5_mideapipe/uploads/test.jpg",  # file/dir/URL/glob, 0 for webcam
         data=ROOT / 'data/coco128.yaml',  # dataset.yaml path
         imgsz=(640, 640),  # inference size (height, width)
         conf_thres=0.25,  # confidence threshold
@@ -59,6 +60,7 @@ def run(
         half=False,  # use FP16 half-precision inference
         dnn=False,  # use OpenCV DNN for ONNX inference
 ):
+    CROPS = []
     source = str(source)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
     is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
@@ -124,7 +126,7 @@ def run(
             save_path = str(save_dir / p.name)  # im.jpg
             txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # im.txt
             s += '%gx%g ' % im.shape[2:]  # print string
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain
             imc = im0.copy() if save_crop else im0  # for save_crop
             annotator = Annotator(im0, line_width=line_thickness, example=str(names))
             if len(det):
@@ -141,15 +143,19 @@ def run(
                     if save_txt:  # Write to file
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
                         line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
-                        with open(f'{txt_path}.txt', 'a') as f:
-                            f.write(('%g ' * len(line)).rstrip() % line + '\n')
+                        if line[0] == torch.tensor(0.):
+                            with open(f'{txt_path}.txt', 'a') as f:
+                                f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
                     if save_img or save_crop or view_img:  # Add bbox to image
                         c = int(cls)  # integer class
                         label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
                         annotator.box_label(xyxy, label, color=colors(c, True))
                     if save_crop:
-                        save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
+                        if label.split(' ')[0] == "person":
+                            crop = save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg',
+                                                BGR=True)
+                            CROPS.append(crop)
 
             # Stream results
             im0 = annotator.result()
@@ -190,44 +196,38 @@ def run(
         LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}")
     if update:
         strip_optimizer(weights[0])  # update model (to fix SourceChangeWarning)
+
+    cv2.imwrite("E:/Testing/yolov5_mideapipe/testing.jpg", CROPS[0])
     # mediapipe
-    crops_path = "E:/Testing/yolov5+mediapipe/runs/detect/exp/crops/person"
-    IMAGE_FILES = [f for f in listdir(crops_path) if isfile(join(crops_path, f))]
+    # crops_path = "E:/Testing/yolov5-mediapipe/runs/detect/exp/crops/person"
+    # IMAGE_FILES = [f for f in listdir(crops_path) if isfile(join(crops_path, f))]
     mp_pose = mp.solutions.pose
     detectedDictionary = {}
+    detectedPersons = []
     with open(
-            "E:/Testing/yolov5+mediapipe/runs/detect/exp/labels/test.txt") as detected_objects_file:
+            "E:/Testing/yolov5_mideapipe/runs/detect/exp/labels/test.txt") as detected_objects_file:
         lines = detected_objects_file.readlines()
-    # if the detected object not a person
-    for line in lines:
-        yolo_label = line.split(' ')[0]  # 0 , 32 etc.
-        if yolo_label != "0":
-            lines.remove(line)
-    print(lines)
     annotated_image = cv2.imread(
-        "E:/Testing/yolov5+mediapipe/runs/detect/exp/test.jpg")
+        "E:/Testing/yolov5_mideapipe/uploads/test.jpg")
     annotated_image_height, annotated_image_width, _ = annotated_image.shape
     with mp_pose.Pose(
             static_image_mode=True,
             model_complexity=2,
             enable_segmentation=True,
             min_detection_confidence=0.5) as pose:
-        for idx, file in enumerate(IMAGE_FILES):
-            print(file)
-            print(idx)
-            image = cv2.imread(crops_path + "/" + file)
-            image_height, image_width, _ = image.shape
+        for idx, crop in enumerate(CROPS):
+            # image = cv2.imread(crops_path + "/" + file)
 
+            image_height, image_width, _ = crop.shape
             yoloFormat = lines[idx][2:-1]
             yoloPointsString = yoloFormat.split(' ')
             yoloPointsFloat = []
-            print(yoloPointsString)
             for point in yoloPointsString:
                 yoloPointsFloat.append(float(point))
 
             x, y, w, h = convert(yoloPointsFloat[0], yoloPointsFloat[1], yoloPointsFloat[2], yoloPointsFloat[3])
             # Convert the BGR image to RGB before processing.
-            results = pose.process(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            results = pose.process(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
             # Draw pose landmarks on the image.
 
             # Use mp_pose.UPPER_BODY_POSE_CONNECTIONS for drawing below when
@@ -240,15 +240,25 @@ def run(
             #     annotated_image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
             landmarks = []
             for data_point in results.pose_landmarks.landmark:
-                landmarks.append({
-                    'X': int((data_point.x) * annotated_image_width),
-                    'Y': int((data_point.y) * annotated_image_height),
-                    'Z': data_point.z,
-                    'Visibility': data_point.visibility,
-                })
-            detectedDictionary[f'peron {idx}'] = landmarks
-    shutil.rmtree('E:/Testing/yolov5+mediapipe/runs/detect/exp/')
-    return detectedDictionary
+                x = int((data_point.x) * annotated_image_width)
+                y = int((data_point.y) * annotated_image_height)
+                z = data_point.z
+                v = data_point.visibility
+                landmark = Landmark(x, y, z, v)
+                landmarks.append(landmark)
+                # landmarks.append({
+                #     'X': int((data_point.x) * annotated_image_width),
+                #     'Y': int((data_point.y) * annotated_image_height),
+                #     'Z': data_point.z,
+                #     'Visibility': data_point.visibility,
+                # })
+            # detectedDictionary[f'peron {idx}'] = landmarks
+            person = Person(idx, landmarks, image_width, image_height)
+            detectedPersons.append(person)
+
+    root = Root(detectedPersons)
+    shutil.rmtree('E:/Testing/yolov5_mideapipe/runs/detect')
+    return root
 
 
 def convert(x, y, w, h):
